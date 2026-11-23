@@ -3,6 +3,29 @@
   "name": "My Plugin Repository",
   "description": "Example plugin repository from the Valenced plugin template.",
   "plugins": {
+    "com.custom.ai-launchpad": {
+      "name": "AI Launchpad",
+      "description": "Adds an AI chat tab with history and context summarization to Discord's Launchpad.",
+      "author": "Your Name",
+      "channels": {
+        "latest": "1.0.0"
+      },
+      "versions": {
+        "1.0.0": {
+          "url": "https://itzoliverguys.github.io/ai-launchpad/pool/com.custom.ai-launchpad@1.0.0.zip",
+          "sha256": "ab45b2fc3557f32562ccbd5973d10e2d92569cb6b271d0663e91f68c286269d5",
+          "size": 4693,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1"
+            },
+            "discord": {
+              "version": "*"
+            }
+          }
+        }
+      }
+    },
     "com.example.always-errors": {
       "name": "Always Errors",
       "description": "A plugin that always throws errors.",
