@@ -8,13 +8,26 @@
       "description": "Adds an AI chat tab with history and context summarization to Discord's Launchpad.",
       "author": "Your Name",
       "channels": {
-        "latest": "1.0.0"
+        "latest": "1.0.1"
       },
       "versions": {
         "1.0.0": {
           "url": "https://itzoliverguys.github.io/ai-launchpad/pool/com.custom.ai-launchpad@1.0.0.zip",
           "sha256": "ab45b2fc3557f32562ccbd5973d10e2d92569cb6b271d0663e91f68c286269d5",
           "size": 4693,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1"
+            },
+            "discord": {
+              "version": "*"
+            }
+          }
+        },
+        "1.0.1": {
+          "url": "https://itzoliverguys.github.io/ai-launchpad/pool/com.custom.ai-launchpad@1.0.1.zip",
+          "sha256": "bbed6e901c5168d85af4dc5b9a102d736dcdfe608507340f8db53ecd8760666a",
+          "size": 4945,
           "dependencies": {
             "valenced.api": {
               "version": ">=1"
