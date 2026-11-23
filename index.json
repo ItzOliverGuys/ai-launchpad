@@ -8,7 +8,7 @@
       "description": "Adds an AI chat tab with history, custom models, and context summarization to Discord's Launchpad.",
       "author": "Your Name",
       "channels": {
-        "latest": "1.0.2"
+        "latest": "1.0.3"
       },
       "versions": {
         "1.0.0": {
@@ -41,6 +41,19 @@
           "url": "https://itzoliverguys.github.io/ai-launchpad/pool/com.custom.ai-launchpad@1.0.2.zip",
           "sha256": "a19f9cf1f9f28fbeebc0ebcb56129486fef514e5e2533953414871b5bf717dcf",
           "size": 5885,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1"
+            },
+            "discord": {
+              "version": "*"
+            }
+          }
+        },
+        "1.0.3": {
+          "url": "https://itzoliverguys.github.io/ai-launchpad/pool/com.custom.ai-launchpad@1.0.3.zip",
+          "sha256": "8bd6b805d8ce3846cc43acd4b6f3893e6d29e5c08b0348f9f90cc780140c6594",
+          "size": 6219,
           "dependencies": {
             "valenced.api": {
               "version": ">=1"
