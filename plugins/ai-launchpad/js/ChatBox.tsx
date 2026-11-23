@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import {
+	Modal,
 	ScrollView,
 	StyleSheet,
 	Text,
@@ -19,36 +20,49 @@ interface ChatBoxProps {
 	models: ModelOption[]
 	selectedModel: ModelOption
 	onSelectModel: (model: ModelOption) => void
-	onPickPhoto: () => Promise<ChatAttachment | null>
-	onPickFile: () => Promise<ChatAttachment | null>
 	onSummarizeContext: () => void
 	onSend: (text: string, attachments: ChatAttachment[]) => void
+	disabled?: boolean
 }
 
 export function ChatBox({
 	models,
 	selectedModel,
 	onSelectModel,
-	onPickPhoto,
-	onPickFile,
 	onSummarizeContext,
 	onSend,
+	disabled,
 }: ChatBoxProps) {
 	const [text, setText] = useState('')
 	const [attachments, setAttachments] = useState<ChatAttachment[]>([])
 	const [menu, setMenu] = useState<'plus' | 'model' | null>(null)
+	const [fileModalOpen, setFileModalOpen] = useState(false)
+	const [fileName, setFileName] = useState('snippet.txt')
+	const [fileContent, setFileContent] = useState('')
 
-	const handleAttach = async (picker: () => Promise<ChatAttachment | null>) => {
-		setMenu(null)
-		const item = await picker()
-		if (item) setAttachments(prev => [...prev, item])
+	const handleAddFileSnippet = () => {
+		if (!fileContent.trim()) return
+		setAttachments(prev => [
+			...prev,
+			{
+				id: String(Date.now()),
+				type: 'file',
+				name: fileName.trim() || 'snippet.txt',
+				mimeType: 'text/plain',
+				data: fileContent,
+			},
+		])
+		setFileContent('')
+		setFileModalOpen(false)
 	}
 
 	const handleSend = () => {
+		if (disabled) return
 		if (!text.trim() && attachments.length === 0) return
 		onSend(text.trim(), attachments)
 		setText('')
 		setAttachments([])
+		setMenu(null)
 	}
 
 	return (
@@ -57,15 +71,12 @@ export function ChatBox({
 				<View style={styles.popover}>
 					<TouchableOpacity
 						style={styles.popoverItem}
-						onPress={() => handleAttach(onPickPhoto)}
+						onPress={() => {
+							setMenu(null)
+							setFileModalOpen(true)
+						}}
 					>
-						<Text style={styles.popoverText}>Add Photo</Text>
-					</TouchableOpacity>
-					<TouchableOpacity
-						style={styles.popoverItem}
-						onPress={() => handleAttach(onPickFile)}
-					>
-						<Text style={styles.popoverText}>Add File</Text>
+						<Text style={styles.popoverText}>Add File / Text Snippet</Text>
 					</TouchableOpacity>
 					<TouchableOpacity
 						style={styles.popoverItem}
@@ -80,7 +91,7 @@ export function ChatBox({
 			)}
 
 			{menu === 'model' && (
-				<View style={styles.popover}>
+				<ScrollView style={styles.modelPopover}>
 					{models.map(m => (
 						<TouchableOpacity
 							key={`${m.provider}:${m.id}`}
@@ -102,7 +113,7 @@ export function ChatBox({
 							</Text>
 						</TouchableOpacity>
 					))}
-				</View>
+				</ScrollView>
 			)}
 
 			<View style={styles.composer}>
@@ -136,6 +147,7 @@ export function ChatBox({
 					placeholder="Ask AI anything..."
 					placeholderTextColor="#8e9297"
 					multiline
+					editable={!disabled}
 				/>
 
 				<View style={styles.bottomBar}>
@@ -155,19 +167,77 @@ export function ChatBox({
 						</TouchableOpacity>
 					</View>
 
-					<TouchableOpacity style={styles.sendBtn} onPress={handleSend}>
+					<TouchableOpacity
+						style={[styles.sendBtn, disabled && styles.sendDisabled]}
+						onPress={handleSend}
+						disabled={disabled}
+					>
 						<Text style={styles.sendText}>^</Text>
 					</TouchableOpacity>
 				</View>
 			</View>
+
+			<Modal
+				visible={fileModalOpen}
+				transparent
+				animationType="fade"
+				onRequestClose={() => setFileModalOpen(false)}
+			>
+				<View style={styles.modalBackdrop}>
+					<View style={styles.modalCard}>
+						<Text style={styles.modalTitle}>Attach File / Snippet</Text>
+						<TextInput
+							style={styles.modalInput}
+							value={fileName}
+							onChangeText={setFileName}
+							placeholder="Filename (e.g. code.ts)"
+							placeholderTextColor="#8e9297"
+						/>
+						<TextInput
+							style={[styles.modalInput, styles.modalTextarea]}
+							value={fileContent}
+							onChangeText={setFileContent}
+							placeholder="Paste file contents or code..."
+							placeholderTextColor="#8e9297"
+							multiline
+						/>
+						<View style={styles.modalActions}>
+							<TouchableOpacity
+								style={styles.modalCancel}
+								onPress={() => setFileModalOpen(false)}
+							>
+								<Text style={styles.popoverText}>Cancel</Text>
+							</TouchableOpacity>
+							<TouchableOpacity
+								style={styles.modalAttach}
+								onPress={handleAddFileSnippet}
+							>
+								<Text style={styles.sendText}>Attach</Text>
+							</TouchableOpacity>
+						</View>
+					</View>
+				</View>
+			</Modal>
 		</View>
 	)
 }
 
 const styles = StyleSheet.create({
 	wrapper: { padding: 8, backgroundColor: '#1e1f22' },
-	popover: { backgroundColor: '#2b2d31', borderRadius: 12, padding: 4, marginBottom: 6 },
-	popoverItem: { paddingHorizontal: 12, paddingVertical: 9 },
+	popover: {
+		backgroundColor: '#2b2d31',
+		borderRadius: 12,
+		padding: 4,
+		marginBottom: 6,
+	},
+	modelPopover: {
+		maxHeight: 180,
+		backgroundColor: '#2b2d31',
+		borderRadius: 12,
+		padding: 4,
+		marginBottom: 6,
+	},
+	popoverItem: { paddingHorizontal: 12, paddingVertical: 10 },
 	popoverText: { color: '#dbdee1', fontSize: 13 },
 	active: { color: '#5865f2', fontWeight: '700' },
 	composer: { backgroundColor: '#2b2d31', borderRadius: 16, padding: 10 },
@@ -192,7 +262,11 @@ const styles = StyleSheet.create({
 		paddingTop: 2,
 		paddingBottom: 8,
 	},
-	bottomBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+	bottomBar: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		justifyContent: 'space-between',
+	},
 	bottomLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
 	plusBtn: {
 		width: 30,
@@ -202,7 +276,12 @@ const styles = StyleSheet.create({
 		alignItems: 'center',
 		justifyContent: 'center',
 	},
-	plusText: { color: '#dbdee1', fontSize: 18, lineHeight: 20, fontWeight: '600' },
+	plusText: {
+		color: '#dbdee1',
+		fontSize: 18,
+		lineHeight: 20,
+		fontWeight: '600',
+	},
 	modelBtn: {
 		backgroundColor: '#383a40',
 		borderRadius: 14,
@@ -218,5 +297,42 @@ const styles = StyleSheet.create({
 		alignItems: 'center',
 		justifyContent: 'center',
 	},
-	sendText: { color: '#ffffff', fontSize: 16, fontWeight: '700' },
+	sendDisabled: { opacity: 0.45 },
+	sendText: { color: '#ffffff', fontSize: 15, fontWeight: '700' },
+	modalBackdrop: {
+		flex: 1,
+		backgroundColor: 'rgba(0,0,0,0.65)',
+		justifyContent: 'center',
+		padding: 16,
+	},
+	modalCard: { backgroundColor: '#1e1f22', borderRadius: 16, padding: 14 },
+	modalTitle: {
+		color: '#f2f3f5',
+		fontSize: 15,
+		fontWeight: '700',
+		marginBottom: 10,
+	},
+	modalInput: {
+		backgroundColor: '#2b2d31',
+		color: '#f2f3f5',
+		borderRadius: 10,
+		paddingHorizontal: 10,
+		paddingVertical: 8,
+		fontSize: 13,
+		marginBottom: 8,
+	},
+	modalTextarea: { minHeight: 110, textAlignVertical: 'top' },
+	modalActions: {
+		flexDirection: 'row',
+		justifyContent: 'flex-end',
+		gap: 10,
+		marginTop: 4,
+	},
+	modalCancel: { paddingHorizontal: 12, paddingVertical: 8 },
+	modalAttach: {
+		backgroundColor: '#5865f2',
+		borderRadius: 10,
+		paddingHorizontal: 14,
+		paddingVertical: 8,
+	},
 })

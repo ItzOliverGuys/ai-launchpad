@@ -2,12 +2,13 @@ import { Stores } from '@valenced/discord/flux'
 import { getModules } from '@valenced/modules/finders'
 import { withName } from '@valenced/modules/finders/filters'
 import { after } from '@valenced/patcher'
-import { useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import {
 	ActivityIndicator,
 	Modal,
 	SafeAreaView,
 	ScrollView,
+	Share,
 	StyleSheet,
 	Text,
 	TextInput,
@@ -38,6 +39,7 @@ interface StorageData {
 	googleKey: string
 	googleBaseUrl: string
 	systemPrompt: string
+	customModelsText: string
 	selectedModel: ModelOption
 	sessions: ChatSession[]
 }
@@ -56,8 +58,28 @@ const DefaultStorage: StorageData = {
 	googleKey: '',
 	googleBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
 	systemPrompt: 'You are a helpful assistant inside Discord mobile.',
+	customModelsText: '',
 	selectedModel: DEFAULT_MODELS[0],
 	sessions: [],
+}
+
+function parseCustomModels(raw: string): ModelOption[] {
+	const extra: ModelOption[] = []
+	for (const line of raw.split('\n')) {
+		const parts = line.split('|').map(p => p.trim())
+		if (parts.length < 3) continue
+		const [label, providerRaw, id] = parts
+		if (
+			(providerRaw === 'openai' ||
+				providerRaw === 'claude' ||
+				providerRaw === 'google') &&
+			label &&
+			id
+		) {
+			extra.push({ label, provider: providerRaw, id })
+		}
+	}
+	return [...DEFAULT_MODELS, ...extra]
 }
 
 function getChannelContext(limit = 25): string {
@@ -101,22 +123,20 @@ export function AILaunchpadScreen({
 	data,
 	onSave,
 	onClose,
-	pickPhoto,
-	pickFile,
 }: {
 	data: StorageData
 	onSave: (patch: Partial<StorageData>) => void
 	onClose?: () => void
-	pickPhoto: () => Promise<ChatAttachment | null>
-	pickFile: () => Promise<ChatAttachment | null>
 }) {
+	const models = parseCustomModels(data.customModelsText ?? '')
+	const scrollRef = useRef<ScrollView>(null)
 	const [sessions, setSessions] = useState<ChatSession[]>(data.sessions ?? [])
 	const [activeId, setActiveId] = useState<string | null>(
 		sessions[0]?.id ?? null,
 	)
 	const [showHistory, setShowHistory] = useState(false)
 	const [selectedModel, setSelectedModel] = useState<ModelOption>(
-		data.selectedModel ?? DEFAULT_MODELS[0],
+		data.selectedModel ?? models[0],
 	)
 	const [loading, setLoading] = useState(false)
 	const [error, setError] = useState<string | null>(null)
@@ -141,8 +161,44 @@ export function AILaunchpadScreen({
 		setError(null)
 	}
 
-	const handleSend = async (text: string, attachments: ChatAttachment[]) => {
+	const deleteChat = (id: string) => {
+		const next = sessions.filter(s => s.id !== id)
+		saveSessions(next)
+		if (activeId === id) setActiveId(next[0]?.id ?? null)
+	}
+
+	const runCompletion = async (
+		targetSession: ChatSession,
+		nextSessions: ChatSession[],
+		history: ChatMessage[],
+	) => {
+		setLoading(true)
 		setError(null)
+		try {
+			const cfg = getConfigForModel(selectedModel, data)
+			if (!cfg.apiKey) {
+				throw new Error(
+					`Missing API key for ${cfg.provider} in plugin settings.`,
+				)
+			}
+			const reply = await sendToProvider(cfg, history, data.systemPrompt)
+			const assistantMsg: ChatMessage = { role: 'assistant', text: reply }
+			const finalSession: ChatSession = {
+				...targetSession,
+				updatedAt: Date.now(),
+				messages: [...history, assistantMsg],
+			}
+			saveSessions(
+				nextSessions.map(s => (s.id === finalSession.id ? finalSession : s)),
+			)
+		} catch (e) {
+			setError(e instanceof Error ? e.message : 'Request failed')
+		} finally {
+			setLoading(false)
+		}
+	}
+
+	const handleSend = async (text: string, attachments: ChatAttachment[]) => {
 		let current = activeSession
 		let nextSessions = [...sessions]
 
@@ -170,34 +226,18 @@ export function AILaunchpadScreen({
 		}
 		nextSessions = nextSessions.map(s => (s.id === current?.id ? current : s))
 		saveSessions(nextSessions)
+		await runCompletion(current, nextSessions, updatedMessages)
+	}
 
-		setLoading(true)
-		try {
-			const cfg = getConfigForModel(selectedModel, data)
-			if (!cfg.apiKey) {
-				throw new Error(
-					`Missing API key for ${cfg.provider} in plugin settings.`,
-				)
-			}
-			const reply = await sendToProvider(
-				cfg,
-				updatedMessages,
-				data.systemPrompt,
-			)
-			const assistantMsg: ChatMessage = { role: 'assistant', text: reply }
-			const finalSession: ChatSession = {
-				...current,
-				updatedAt: Date.now(),
-				messages: [...updatedMessages, assistantMsg],
-			}
-			saveSessions(
-				nextSessions.map(s => (s.id === finalSession.id ? finalSession : s)),
-			)
-		} catch (e) {
-			setError(e instanceof Error ? e.message : 'Request failed')
-		} finally {
-			setLoading(false)
-		}
+	const handleRetryLast = async () => {
+		if (!activeSession || activeSession.messages.length === 0 || loading) return
+		const msgs = [...activeSession.messages]
+		if (msgs[msgs.length - 1]?.role === 'assistant') msgs.pop()
+		if (msgs.length === 0) return
+		const updated = { ...activeSession, messages: msgs, updatedAt: Date.now() }
+		const nextSessions = sessions.map(s => (s.id === updated.id ? updated : s))
+		saveSessions(nextSessions)
+		await runCompletion(updated, nextSessions, msgs)
 	}
 
 	const handleSummarizeContext = () => {
@@ -225,7 +265,9 @@ export function AILaunchpadScreen({
 						style={styles.headerBtn}
 						onPress={() => setShowHistory(v => !v)}
 					>
-						<Text style={styles.headerBtnText}>History</Text>
+						<Text style={styles.headerBtnText}>
+							History ({sessions.length})
+						</Text>
 					</TouchableOpacity>
 				</View>
 				<View style={styles.headerRight}>
@@ -247,44 +289,76 @@ export function AILaunchpadScreen({
 						<Text style={styles.emptyText}>No saved chats yet.</Text>
 					)}
 					{sessions.map(s => (
-						<TouchableOpacity
+						<View
 							key={s.id}
 							style={[
 								styles.historyItem,
 								s.id === activeId && styles.historyActive,
 							]}
-							onPress={() => {
-								setActiveId(s.id)
-								setShowHistory(false)
-							}}
 						>
-							<Text style={styles.historyTitle} numberOfLines={1}>
-								{s.title}
-							</Text>
-						</TouchableOpacity>
+							<TouchableOpacity
+								style={{ flex: 1 }}
+								onPress={() => {
+									setActiveId(s.id)
+									setShowHistory(false)
+								}}
+							>
+								<Text style={styles.historyTitle} numberOfLines={1}>
+									{s.title}
+								</Text>
+							</TouchableOpacity>
+							<TouchableOpacity onPress={() => deleteChat(s.id)}>
+								<Text style={styles.deleteChat}>x</Text>
+							</TouchableOpacity>
+						</View>
 					))}
 				</ScrollView>
 			)}
 
-			<ScrollView style={styles.messages}>
+			<ScrollView
+				ref={scrollRef}
+				style={styles.messages}
+				onContentSizeChange={() =>
+					scrollRef.current?.scrollToEnd({ animated: true })
+				}
+			>
 				{(!activeSession || activeSession.messages.length === 0) && (
 					<Text style={styles.emptyText}>
 						Ask anything or tap Summarize to read this channel.
 					</Text>
 				)}
-				{activeSession?.messages.map((m, idx) => (
-					<View
-						key={`${activeSession.id}-${idx}`}
-						style={[
-							styles.msgBubble,
-							m.role === 'user' ? styles.userBubble : styles.aiMsgBubble,
-						]}
-					>
-						<Text style={styles.msgText} selectable>
-							{m.text}
-						</Text>
-					</View>
-				))}
+				{activeSession?.messages.map((m, idx) => {
+					const isLastAssistant =
+						m.role === 'assistant' &&
+						idx === activeSession.messages.length - 1
+					return (
+						<View
+							key={`${activeSession.id}-${idx}`}
+							style={[
+								styles.msgBubble,
+								m.role === 'user' ? styles.userBubble : styles.aiMsgBubble,
+							]}
+						>
+							<Text style={styles.msgText} selectable>
+								{m.text}
+							</Text>
+							{m.role === 'assistant' && (
+								<View style={styles.msgActions}>
+									<TouchableOpacity
+										onPress={() => Share.share({ message: m.text })}
+									>
+										<Text style={styles.msgActionText}>Share / Copy</Text>
+									</TouchableOpacity>
+									{isLastAssistant && (
+										<TouchableOpacity onPress={handleRetryLast}>
+											<Text style={styles.msgActionText}>Retry</Text>
+										</TouchableOpacity>
+									)}
+								</View>
+							)}
+						</View>
+					)
+				})}
 				{loading && (
 					<ActivityIndicator color="#5865f2" style={{ marginVertical: 10 }} />
 				)}
@@ -292,16 +366,15 @@ export function AILaunchpadScreen({
 			</ScrollView>
 
 			<ChatBox
-				models={DEFAULT_MODELS}
+				models={models}
 				selectedModel={selectedModel}
 				onSelectModel={m => {
 					setSelectedModel(m)
 					onSave({ selectedModel: m })
 				}}
-				onPickPhoto={pickPhoto}
-				onPickFile={pickFile}
 				onSummarizeContext={handleSummarizeContext}
 				onSend={handleSend}
+				disabled={loading}
 			/>
 		</SafeAreaView>
 	)
@@ -312,7 +385,10 @@ function LaunchpadWithAI({
 	storage,
 }: {
 	children: ReactNode
-	storage: { use: () => StorageData | undefined; set: (p: Partial<StorageData>) => void }
+	storage: {
+		use: () => StorageData | undefined
+		set: (p: Partial<StorageData>) => void
+	}
 }) {
 	const [open, setOpen] = useState(false)
 	const data = { ...DefaultStorage, ...(storage.use() ?? {}) }
@@ -326,13 +402,15 @@ function LaunchpadWithAI({
 			>
 				<Text style={styles.floatingAIText}>AI</Text>
 			</TouchableOpacity>
-			<Modal visible={open} animationType="slide" onRequestClose={() => setOpen(false)}>
+			<Modal
+				visible={open}
+				animationType="slide"
+				onRequestClose={() => setOpen(false)}
+			>
 				<AILaunchpadScreen
 					data={data}
 					onSave={patch => storage.set(patch)}
 					onClose={() => setOpen(false)}
-					pickPhoto={async () => null}
-					pickFile={async () => null}
 				/>
 			</Modal>
 		</View>
@@ -390,10 +468,30 @@ export default plugin<{ jsonStorage: StorageData }>({
 						data={stored}
 						onSave={patch => jsonStorage.set(patch)}
 						onClose={() => setChatOpen(false)}
-						pickPhoto={async () => null}
-						pickFile={async () => null}
 					/>
 				</Modal>
+
+				<Text style={styles.sectionTitle}>System Prompt</Text>
+				<TextInput
+					style={[styles.settingInput, { minHeight: 68 }]}
+					placeholder="System prompt..."
+					placeholderTextColor="#8e9297"
+					multiline
+					value={stored.systemPrompt}
+					onChangeText={v => update('systemPrompt', v)}
+				/>
+
+				<Text style={styles.sectionTitle}>
+					Custom Models (one per line: Label | provider | model-id)
+				</Text>
+				<TextInput
+					style={[styles.settingInput, { minHeight: 74 }]}
+					placeholder="DeepSeek | openai | deepseek-chat"
+					placeholderTextColor="#8e9297"
+					multiline
+					value={stored.customModelsText}
+					onChangeText={v => update('customModelsText', v)}
+				/>
 
 				<Text style={styles.sectionTitle}>Claude (Anthropic)</Text>
 				<TextInput
@@ -479,9 +577,16 @@ const styles = StyleSheet.create({
 	},
 	newChatText: { color: '#ffffff', fontSize: 18, fontWeight: '700' },
 	historyList: { maxHeight: 160, backgroundColor: '#111214', padding: 8 },
-	historyItem: { padding: 10, borderRadius: 8, marginBottom: 4 },
+	historyItem: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		padding: 10,
+		borderRadius: 8,
+		marginBottom: 4,
+	},
 	historyActive: { backgroundColor: '#2b2d31' },
 	historyTitle: { color: '#dbdee1', fontSize: 13 },
+	deleteChat: { color: '#949ba4', paddingHorizontal: 8, fontSize: 13 },
 	messages: { flex: 1, padding: 10 },
 	emptyText: {
 		color: '#949ba4',
@@ -498,6 +603,8 @@ const styles = StyleSheet.create({
 	userBubble: { alignSelf: 'flex-end', backgroundColor: '#5865f2' },
 	aiMsgBubble: { alignSelf: 'flex-start', backgroundColor: '#2b2d31' },
 	msgText: { color: '#f2f3f5', fontSize: 14 },
+	msgActions: { flexDirection: 'row', gap: 14, marginTop: 6 },
+	msgActionText: { color: '#949ba4', fontSize: 11, fontWeight: '600' },
 	errorText: { color: '#f23f42', fontSize: 12, marginTop: 6 },
 	floatingAI: {
 		position: 'absolute',
