@@ -2,9 +2,11 @@ import { Stores } from '@valenced/discord/flux'
 import { getModules } from '@valenced/modules/finders'
 import { withName } from '@valenced/modules/finders/filters'
 import { after } from '@valenced/patcher'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import {
 	ActivityIndicator,
+	Modal,
+	SafeAreaView,
 	ScrollView,
 	StyleSheet,
 	Text,
@@ -59,8 +61,13 @@ const DefaultStorage: StorageData = {
 }
 
 function getChannelContext(limit = 25): string {
-	const storeMap = Stores as unknown as Record<string, Record<string, (...args: unknown[]) => unknown>>
-	const channelId = storeMap.SelectedChannelStore?.getChannelId?.() as string | undefined
+	const storeMap = Stores as unknown as Record<
+		string,
+		Record<string, (...args: unknown[]) => unknown>
+	>
+	const channelId = storeMap.SelectedChannelStore?.getChannelId?.() as
+		| string
+		| undefined
 	if (!channelId) return ''
 	const msgCollection = storeMap.MessageStore?.getMessages?.(channelId) as
 		| { toArray?: () => { author?: { username?: string }; content?: string }[] }
@@ -73,7 +80,10 @@ function getChannelContext(limit = 25): string {
 		.join('\n')
 }
 
-function getConfigForModel(model: ModelOption, data: StorageData): ProviderConfig {
+function getConfigForModel(
+	model: ModelOption,
+	data: StorageData,
+): ProviderConfig {
 	const map: Record<ProviderType, { apiKey: string; baseUrl: string }> = {
 		openai: { apiKey: data.openaiKey, baseUrl: data.openaiBaseUrl },
 		claude: { apiKey: data.claudeKey, baseUrl: data.claudeBaseUrl },
@@ -87,37 +97,23 @@ function getConfigForModel(model: ModelOption, data: StorageData): ProviderConfi
 	}
 }
 
-export function AIBubbleIcon({ active }: { active: boolean }) {
-	return (
-		<View
-			style={[
-				styles.aiBubble,
-				{
-					borderColor: active ? '#ffffff' : '#b5bac1',
-					backgroundColor: active ? '#5865f2' : 'transparent',
-				},
-			]}
-		>
-			<Text style={[styles.aiBubbleText, { color: active ? '#ffffff' : '#b5bac1' }]}>
-				AI
-			</Text>
-		</View>
-	)
-}
-
 export function AILaunchpadScreen({
 	data,
 	onSave,
+	onClose,
 	pickPhoto,
 	pickFile,
 }: {
 	data: StorageData
 	onSave: (patch: Partial<StorageData>) => void
+	onClose?: () => void
 	pickPhoto: () => Promise<ChatAttachment | null>
 	pickFile: () => Promise<ChatAttachment | null>
 }) {
 	const [sessions, setSessions] = useState<ChatSession[]>(data.sessions ?? [])
-	const [activeId, setActiveId] = useState<string | null>(sessions[0]?.id ?? null)
+	const [activeId, setActiveId] = useState<string | null>(
+		sessions[0]?.id ?? null,
+	)
 	const [showHistory, setShowHistory] = useState(false)
 	const [selectedModel, setSelectedModel] = useState<ModelOption>(
 		data.selectedModel ?? DEFAULT_MODELS[0],
@@ -165,7 +161,10 @@ export function AILaunchpadScreen({
 		const updatedMessages = [...current.messages, userMsg]
 		current = {
 			...current,
-			title: current.messages.length === 0 && text ? text.slice(0, 32) : current.title,
+			title:
+				current.messages.length === 0 && text
+					? text.slice(0, 32)
+					: current.title,
 			updatedAt: Date.now(),
 			messages: updatedMessages,
 		}
@@ -176,16 +175,24 @@ export function AILaunchpadScreen({
 		try {
 			const cfg = getConfigForModel(selectedModel, data)
 			if (!cfg.apiKey) {
-				throw new Error(`Missing API key for ${cfg.provider} in plugin settings.`)
+				throw new Error(
+					`Missing API key for ${cfg.provider} in plugin settings.`,
+				)
 			}
-			const reply = await sendToProvider(cfg, updatedMessages, data.systemPrompt)
+			const reply = await sendToProvider(
+				cfg,
+				updatedMessages,
+				data.systemPrompt,
+			)
 			const assistantMsg: ChatMessage = { role: 'assistant', text: reply }
 			const finalSession: ChatSession = {
 				...current,
 				updatedAt: Date.now(),
 				messages: [...updatedMessages, assistantMsg],
 			}
-			saveSessions(nextSessions.map(s => (s.id === finalSession.id ? finalSession : s)))
+			saveSessions(
+				nextSessions.map(s => (s.id === finalSession.id ? finalSession : s)),
+			)
 		} catch (e) {
 			setError(e instanceof Error ? e.message : 'Request failed')
 		} finally {
@@ -206,16 +213,26 @@ export function AILaunchpadScreen({
 	}
 
 	return (
-		<View style={styles.container}>
+		<SafeAreaView style={styles.container}>
 			<View style={styles.header}>
-				<TouchableOpacity
-					style={styles.headerBtn}
-					onPress={() => setShowHistory(v => !v)}
-				>
-					<Text style={styles.headerBtnText}>History</Text>
-				</TouchableOpacity>
+				<View style={styles.headerLeft}>
+					{onClose && (
+						<TouchableOpacity style={styles.headerBtn} onPress={onClose}>
+							<Text style={styles.headerBtnText}>Close</Text>
+						</TouchableOpacity>
+					)}
+					<TouchableOpacity
+						style={styles.headerBtn}
+						onPress={() => setShowHistory(v => !v)}
+					>
+						<Text style={styles.headerBtnText}>History</Text>
+					</TouchableOpacity>
+				</View>
 				<View style={styles.headerRight}>
-					<TouchableOpacity style={styles.headerBtn} onPress={handleSummarizeContext}>
+					<TouchableOpacity
+						style={styles.headerBtn}
+						onPress={handleSummarizeContext}
+					>
 						<Text style={styles.headerBtnText}>Summarize</Text>
 					</TouchableOpacity>
 					<TouchableOpacity style={styles.newChatBtn} onPress={createNewChat}>
@@ -232,7 +249,10 @@ export function AILaunchpadScreen({
 					{sessions.map(s => (
 						<TouchableOpacity
 							key={s.id}
-							style={[styles.historyItem, s.id === activeId && styles.historyActive]}
+							style={[
+								styles.historyItem,
+								s.id === activeId && styles.historyActive,
+							]}
 							onPress={() => {
 								setActiveId(s.id)
 								setShowHistory(false)
@@ -260,10 +280,14 @@ export function AILaunchpadScreen({
 							m.role === 'user' ? styles.userBubble : styles.aiMsgBubble,
 						]}
 					>
-						<Text style={styles.msgText}>{m.text}</Text>
+						<Text style={styles.msgText} selectable>
+							{m.text}
+						</Text>
 					</View>
 				))}
-				{loading && <ActivityIndicator color="#5865f2" style={{ marginVertical: 10 }} />}
+				{loading && (
+					<ActivityIndicator color="#5865f2" style={{ marginVertical: 10 }} />
+				)}
 				{error && <Text style={styles.errorText}>{error}</Text>}
 			</ScrollView>
 
@@ -279,6 +303,38 @@ export function AILaunchpadScreen({
 				onSummarizeContext={handleSummarizeContext}
 				onSend={handleSend}
 			/>
+		</SafeAreaView>
+	)
+}
+
+function LaunchpadWithAI({
+	children,
+	storage,
+}: {
+	children: ReactNode
+	storage: { use: () => StorageData | undefined; set: (p: Partial<StorageData>) => void }
+}) {
+	const [open, setOpen] = useState(false)
+	const data = { ...DefaultStorage, ...(storage.use() ?? {}) }
+
+	return (
+		<View style={{ flex: 1 }}>
+			{children}
+			<TouchableOpacity
+				style={styles.floatingAI}
+				onPress={() => setOpen(true)}
+			>
+				<Text style={styles.floatingAIText}>AI</Text>
+			</TouchableOpacity>
+			<Modal visible={open} animationType="slide" onRequestClose={() => setOpen(false)}>
+				<AILaunchpadScreen
+					data={data}
+					onSave={patch => storage.set(patch)}
+					onClose={() => setOpen(false)}
+					pickPhoto={async () => null}
+					pickFile={async () => null}
+				/>
+			</Modal>
 		</View>
 	)
 }
@@ -288,27 +344,57 @@ export default plugin<{ jsonStorage: StorageData }>({
 		load: true,
 		default: DefaultStorage,
 	},
-	start({ cleanup }) {
+	start({ cleanup, jsonStorage }) {
 		cleanup(
-			getModules(withName<Record<string, (...args: unknown[]) => unknown>>('Launchpad'), mod => {
-				if (!('default' in mod) || typeof mod.default !== 'function') return
-				cleanup(
-					after(mod, 'default', res => {
-						return res
-					}),
-				)
-			}),
+			getModules(
+				withName<Record<string, (...args: unknown[]) => unknown>>('Launchpad'),
+				mod => {
+					if (!('default' in mod) || typeof mod.default !== 'function') return
+					cleanup(
+						after(mod, 'default', res => (
+							<LaunchpadWithAI storage={jsonStorage}>
+								{res as ReactNode}
+							</LaunchpadWithAI>
+						)),
+					)
+				},
+			),
 		)
 	},
 	SettingsComponent({ api: { jsonStorage } }) {
+		const [chatOpen, setChatOpen] = useState(false)
 		const stored = { ...DefaultStorage, ...(jsonStorage.use() ?? {}) }
 
-		const update = <K extends keyof StorageData>(key: K, value: StorageData[K]) => {
+		const update = <K extends keyof StorageData>(
+			key: K,
+			value: StorageData[K],
+		) => {
 			jsonStorage.set({ [key]: value })
 		}
 
 		return (
 			<ScrollView style={styles.settingsPage}>
+				<TouchableOpacity
+					style={styles.openChatBtn}
+					onPress={() => setChatOpen(true)}
+				>
+					<Text style={styles.openChatBtnText}>Open AI Chat</Text>
+				</TouchableOpacity>
+
+				<Modal
+					visible={chatOpen}
+					animationType="slide"
+					onRequestClose={() => setChatOpen(false)}
+				>
+					<AILaunchpadScreen
+						data={stored}
+						onSave={patch => jsonStorage.set(patch)}
+						onClose={() => setChatOpen(false)}
+						pickPhoto={async () => null}
+						pickFile={async () => null}
+					/>
+				</Modal>
+
 				<Text style={styles.sectionTitle}>Claude (Anthropic)</Text>
 				<TextInput
 					style={styles.settingInput}
@@ -374,6 +460,7 @@ const styles = StyleSheet.create({
 		borderBottomWidth: 1,
 		borderColor: '#2b2d31',
 	},
+	headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
 	headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
 	headerBtn: {
 		backgroundColor: '#2b2d31',
@@ -396,23 +483,49 @@ const styles = StyleSheet.create({
 	historyActive: { backgroundColor: '#2b2d31' },
 	historyTitle: { color: '#dbdee1', fontSize: 13 },
 	messages: { flex: 1, padding: 10 },
-	emptyText: { color: '#949ba4', textAlign: 'center', marginTop: 24, fontSize: 13 },
-	msgBubble: { padding: 10, borderRadius: 12, marginBottom: 8, maxWidth: '88%' },
+	emptyText: {
+		color: '#949ba4',
+		textAlign: 'center',
+		marginTop: 24,
+		fontSize: 13,
+	},
+	msgBubble: {
+		padding: 10,
+		borderRadius: 12,
+		marginBottom: 8,
+		maxWidth: '88%',
+	},
 	userBubble: { alignSelf: 'flex-end', backgroundColor: '#5865f2' },
 	aiMsgBubble: { alignSelf: 'flex-start', backgroundColor: '#2b2d31' },
 	msgText: { color: '#f2f3f5', fontSize: 14 },
 	errorText: { color: '#f23f42', fontSize: 12, marginTop: 6 },
-	aiBubble: {
-		borderWidth: 1.5,
-		borderRadius: 10,
-		paddingHorizontal: 6,
-		paddingVertical: 2,
-		alignItems: 'center',
-		justifyContent: 'center',
+	floatingAI: {
+		position: 'absolute',
+		top: 14,
+		right: 14,
+		backgroundColor: '#5865f2',
+		borderRadius: 18,
+		paddingHorizontal: 14,
+		paddingVertical: 8,
+		elevation: 6,
 	},
-	aiBubbleText: { fontSize: 11, fontWeight: '800' },
+	floatingAIText: { color: '#ffffff', fontSize: 13, fontWeight: '800' },
 	settingsPage: { flex: 1, padding: 14, backgroundColor: '#1e1f22' },
-	sectionTitle: { color: '#f2f3f5', fontSize: 14, fontWeight: '700', marginTop: 14, marginBottom: 6 },
+	openChatBtn: {
+		backgroundColor: '#5865f2',
+		borderRadius: 12,
+		paddingVertical: 12,
+		alignItems: 'center',
+		marginBottom: 8,
+	},
+	openChatBtnText: { color: '#ffffff', fontSize: 15, fontWeight: '700' },
+	sectionTitle: {
+		color: '#f2f3f5',
+		fontSize: 14,
+		fontWeight: '700',
+		marginTop: 14,
+		marginBottom: 6,
+	},
 	settingInput: {
 		backgroundColor: '#2b2d31',
 		color: '#f2f3f5',
