@@ -4,7 +4,7 @@
   "name": "AI Launchpad",
   "description": "Adds an AI chat tab with history, custom models, and context summarization to Discord's Launchpad.",
   "author": "Your Name",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "dependencies": {
     "valenced.api": { "version": ">=1" },
     "discord": { "version": "*" }

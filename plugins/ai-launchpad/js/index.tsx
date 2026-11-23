@@ -2,7 +2,7 @@ import { Stores } from '@valenced/discord/flux'
 import { getModules } from '@valenced/modules/finders'
 import { withName } from '@valenced/modules/finders/filters'
 import { after } from '@valenced/patcher'
-import { useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
 	ActivityIndicator,
 	Modal,
@@ -34,52 +34,98 @@ interface ChatSession {
 interface StorageData {
 	openaiKey: string
 	openaiBaseUrl: string
+	openaiModel: string
 	claudeKey: string
 	claudeBaseUrl: string
+	claudeModel: string
 	googleKey: string
 	googleBaseUrl: string
+	googleModel: string
 	systemPrompt: string
 	customModelsText: string
-	selectedModel: ModelOption
+	selectedModel?: ModelOption
 	sessions: ChatSession[]
 }
-
-const DEFAULT_MODELS: ModelOption[] = [
-	{ id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet', provider: 'claude' },
-	{ id: 'gpt-4o', label: 'GPT-4o', provider: 'openai' },
-	{ id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', provider: 'google' },
-]
 
 const DefaultStorage: StorageData = {
 	openaiKey: '',
 	openaiBaseUrl: 'https://api.openai.com/v1',
+	openaiModel: 'gpt-4o',
 	claudeKey: '',
 	claudeBaseUrl: 'https://api.anthropic.com/v1',
+	claudeModel: 'claude-sonnet-4-20250514',
 	googleKey: '',
 	googleBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+	googleModel: 'gemini-2.5-flash',
 	systemPrompt: 'You are a helpful assistant inside Discord mobile.',
 	customModelsText: '',
-	selectedModel: DEFAULT_MODELS[0],
 	sessions: [],
 }
 
-function parseCustomModels(raw: string): ModelOption[] {
-	const extra: ModelOption[] = []
-	for (const line of raw.split('\n')) {
-		const parts = line.split('|').map(p => p.trim())
-		if (parts.length < 3) continue
-		const [label, providerRaw, id] = parts
-		if (
-			(providerRaw === 'openai' ||
-				providerRaw === 'claude' ||
-				providerRaw === 'google') &&
-			label &&
-			id
-		) {
-			extra.push({ label, provider: providerRaw, id })
+function buildModels(data: StorageData): ModelOption[] {
+	const list: ModelOption[] = []
+
+	if (data.openaiKey.trim()) {
+		const id = data.openaiModel.trim() || 'gpt-4o'
+		list.push({ id, label: id, provider: 'openai' })
+	}
+	if (data.claudeKey.trim()) {
+		const id = data.claudeModel.trim() || 'claude-sonnet-4-20250514'
+		list.push({ id, label: id, provider: 'claude' })
+	}
+	if (data.googleKey.trim()) {
+		const id = data.googleModel.trim() || 'gemini-2.5-flash'
+		list.push({ id, label: id, provider: 'google' })
+	}
+
+	for (const line of (data.customModelsText ?? '').split('\n')) {
+		const trimmed = line.trim()
+		if (!trimmed) continue
+		const parts = trimmed.split('|').map(p => p.trim())
+		if (parts.length >= 3) {
+			const [label, providerRaw, id] = parts
+			if (
+				(providerRaw === 'openai' ||
+					providerRaw === 'claude' ||
+					providerRaw === 'google') &&
+				label &&
+				id
+			) {
+				list.push({ label, provider: providerRaw, id })
+			}
+		} else {
+			list.push({ label: trimmed, provider: 'openai', id: trimmed })
 		}
 	}
-	return [...DEFAULT_MODELS, ...extra]
+
+	if (list.length === 0) {
+		list.push(
+			{ id: data.openaiModel.trim() || 'gpt-4o', label: 'OpenAI', provider: 'openai' },
+			{
+				id: data.claudeModel.trim() || 'claude-sonnet-4-20250514',
+				label: 'Claude',
+				provider: 'claude',
+			},
+			{
+				id: data.googleModel.trim() || 'gemini-2.5-flash',
+				label: 'Gemini',
+				provider: 'google',
+			},
+		)
+	}
+
+	return list
+}
+
+function resolveActiveModel(data: StorageData, models: ModelOption[]): ModelOption {
+	const saved = data.selectedModel
+	if (saved) {
+		const match = models.find(
+			m => m.provider === saved.provider && m.id === saved.id,
+		)
+		if (match) return match
+	}
+	return models[0]
 }
 
 function getChannelContext(limit = 25): string {
@@ -114,7 +160,7 @@ function getConfigForModel(
 	return {
 		provider: model.provider,
 		model: model.id,
-		apiKey: map[model.provider].apiKey,
+		apiKey: map[model.provider].apiKey.trim(),
 		baseUrl: map[model.provider].baseUrl || undefined,
 	}
 }
@@ -128,18 +174,30 @@ export function AILaunchpadScreen({
 	onSave: (patch: Partial<StorageData>) => void
 	onClose?: () => void
 }) {
-	const models = parseCustomModels(data.customModelsText ?? '')
+	const models = buildModels(data)
 	const scrollRef = useRef<ScrollView>(null)
 	const [sessions, setSessions] = useState<ChatSession[]>(data.sessions ?? [])
 	const [activeId, setActiveId] = useState<string | null>(
 		sessions[0]?.id ?? null,
 	)
 	const [showHistory, setShowHistory] = useState(false)
-	const [selectedModel, setSelectedModel] = useState<ModelOption>(
-		data.selectedModel ?? models[0],
+	const [selectedModel, setSelectedModel] = useState<ModelOption>(() =>
+		resolveActiveModel(data, models),
 	)
 	const [loading, setLoading] = useState(false)
 	const [error, setError] = useState<string | null>(null)
+
+	useEffect(() => {
+		setSelectedModel(resolveActiveModel(data, models))
+	}, [
+		data.openaiKey,
+		data.openaiModel,
+		data.claudeKey,
+		data.claudeModel,
+		data.googleKey,
+		data.googleModel,
+		data.customModelsText,
+	])
 
 	const activeSession = sessions.find(s => s.id === activeId) ?? null
 
@@ -471,26 +529,28 @@ export default plugin<{ jsonStorage: StorageData }>({
 					/>
 				</Modal>
 
-				<Text style={styles.sectionTitle}>System Prompt</Text>
+				<Text style={styles.sectionTitle}>OpenAI / Custom OpenAI Endpoint</Text>
 				<TextInput
-					style={[styles.settingInput, { minHeight: 68 }]}
-					placeholder="System prompt..."
+					style={styles.settingInput}
+					placeholder="API Key (sk-...)"
 					placeholderTextColor="#8e9297"
-					multiline
-					value={stored.systemPrompt}
-					onChangeText={v => update('systemPrompt', v)}
+					secureTextEntry
+					value={stored.openaiKey}
+					onChangeText={v => update('openaiKey', v)}
 				/>
-
-				<Text style={styles.sectionTitle}>
-					Custom Models (one per line: Label | provider | model-id)
-				</Text>
 				<TextInput
-					style={[styles.settingInput, { minHeight: 74 }]}
-					placeholder="DeepSeek | openai | deepseek-chat"
+					style={styles.settingInput}
+					placeholder="Base URL (e.g. https://api.openai.com/v1)"
 					placeholderTextColor="#8e9297"
-					multiline
-					value={stored.customModelsText}
-					onChangeText={v => update('customModelsText', v)}
+					value={stored.openaiBaseUrl}
+					onChangeText={v => update('openaiBaseUrl', v)}
+				/>
+				<TextInput
+					style={styles.settingInput}
+					placeholder="Model ID (e.g. gpt-4o, deepseek-chat)"
+					placeholderTextColor="#8e9297"
+					value={stored.openaiModel}
+					onChangeText={v => update('openaiModel', v)}
 				/>
 
 				<Text style={styles.sectionTitle}>Claude (Anthropic)</Text>
@@ -509,22 +569,12 @@ export default plugin<{ jsonStorage: StorageData }>({
 					value={stored.claudeBaseUrl}
 					onChangeText={v => update('claudeBaseUrl', v)}
 				/>
-
-				<Text style={styles.sectionTitle}>OpenAI</Text>
 				<TextInput
 					style={styles.settingInput}
-					placeholder="API Key (sk-...)"
+					placeholder="Model ID (e.g. claude-sonnet-4-20250514)"
 					placeholderTextColor="#8e9297"
-					secureTextEntry
-					value={stored.openaiKey}
-					onChangeText={v => update('openaiKey', v)}
-				/>
-				<TextInput
-					style={styles.settingInput}
-					placeholder="Base URL"
-					placeholderTextColor="#8e9297"
-					value={stored.openaiBaseUrl}
-					onChangeText={v => update('openaiBaseUrl', v)}
+					value={stored.claudeModel}
+					onChangeText={v => update('claudeModel', v)}
 				/>
 
 				<Text style={styles.sectionTitle}>Google Gemini</Text>
@@ -542,6 +592,35 @@ export default plugin<{ jsonStorage: StorageData }>({
 					placeholderTextColor="#8e9297"
 					value={stored.googleBaseUrl}
 					onChangeText={v => update('googleBaseUrl', v)}
+				/>
+				<TextInput
+					style={styles.settingInput}
+					placeholder="Model ID (e.g. gemini-2.5-flash)"
+					placeholderTextColor="#8e9297"
+					value={stored.googleModel}
+					onChangeText={v => update('googleModel', v)}
+				/>
+
+				<Text style={styles.sectionTitle}>System Prompt</Text>
+				<TextInput
+					style={[styles.settingInput, { minHeight: 68 }]}
+					placeholder="System prompt..."
+					placeholderTextColor="#8e9297"
+					multiline
+					value={stored.systemPrompt}
+					onChangeText={v => update('systemPrompt', v)}
+				/>
+
+				<Text style={styles.sectionTitle}>
+					Extra Models (one per line: model-id or Label | provider | model-id)
+				</Text>
+				<TextInput
+					style={[styles.settingInput, { minHeight: 74 }]}
+					placeholder="deepseek-reasoner"
+					placeholderTextColor="#8e9297"
+					multiline
+					value={stored.customModelsText}
+					onChangeText={v => update('customModelsText', v)}
 				/>
 			</ScrollView>
 		)

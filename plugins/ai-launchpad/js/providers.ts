@@ -30,13 +30,22 @@ function buildTextWithFiles(msg: ChatMessage): string {
 	return msg.text ? `${fileBlocks}\n\n${msg.text}` : fileBlocks
 }
 
+function normalizeUrl(raw: string | undefined, fallback: string): string {
+	const trimmed = (raw ?? '').trim().replace(/\/+$/, '')
+	return trimmed || fallback
+}
+
 export async function sendToProvider(
 	config: ProviderConfig,
 	messages: ChatMessage[],
 	systemPrompt?: string,
 ): Promise<string> {
 	if (config.provider === 'openai') {
-		const url = `${config.baseUrl ?? 'https://api.openai.com/v1'}/chat/completions`
+		const base = normalizeUrl(config.baseUrl, 'https://api.openai.com/v1')
+		const url = base.endsWith('/chat/completions')
+			? base
+			: `${base}/chat/completions`
+
 		const bodyMessages: Record<string, unknown>[] = []
 		if (systemPrompt) bodyMessages.push({ role: 'system', content: systemPrompt })
 
@@ -75,7 +84,9 @@ export async function sendToProvider(
 	}
 
 	if (config.provider === 'claude') {
-		const url = `${config.baseUrl ?? 'https://api.anthropic.com/v1'}/messages`
+		const base = normalizeUrl(config.baseUrl, 'https://api.anthropic.com/v1')
+		const url = base.endsWith('/messages') ? base : `${base}/messages`
+
 		const claudeMessages = messages.map(m => {
 			const images = (m.attachments ?? []).filter(a => a.type === 'image')
 			const text = buildTextWithFiles(m)
@@ -117,7 +128,10 @@ export async function sendToProvider(
 		return data.content?.map(c => c.text ?? '').join('') ?? ''
 	}
 
-	const base = config.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta'
+	const base = normalizeUrl(
+		config.baseUrl,
+		'https://generativelanguage.googleapis.com/v1beta',
+	)
 	const url = `${base}/models/${encodeURIComponent(config.model)}:generateContent?key=${encodeURIComponent(config.apiKey)}`
 	const contents = messages.map(m => {
 		const parts: Record<string, unknown>[] = []
